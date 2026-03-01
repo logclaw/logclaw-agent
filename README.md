@@ -32,7 +32,7 @@ It packages up everything it found and sends it to the [LogClaw Platform](https:
 ┌──────────────────────────────────────────────────────────────┐
 │  Your Kubernetes Cluster                                     │
 │                                                              │
-│  logclaw-agent pod                                           │
+│  logclaw-agent pod (:8080 health server)                     │
 │    ├── watches Kafka CRDs     (consumer lag per topic)       │
 │    ├── watches Flink CRDs     (job state + restart count)    │
 │    ├── watches OpenSearch CRDs (cluster health)              │
@@ -52,6 +52,15 @@ It packages up everything it found and sends it to the [LogClaw Platform](https:
 
 The agent uses the **Kubernetes API** (via its ServiceAccount) to list and read custom resources. It never touches your application traffic, databases, or secrets directly — it only reads CRD status fields.
 
+### Health Endpoints
+
+The agent exposes two HTTP endpoints on `:8080` for Kubernetes probes:
+
+| Endpoint | Purpose | Behavior |
+|---|---|---|
+| `GET /healthz` | Liveness probe | Always returns `200 OK` |
+| `GET /readyz` | Readiness probe | Returns `503` until the first collection cycle completes, then `200 OK` |
+
 ---
 
 ## Prerequisites
@@ -63,7 +72,7 @@ The agent uses the **Kubernetes API** (via its ServiceAccount) to list and read 
 | [Strimzi Kafka Operator](https://strimzi.io) | any | For Kafka metrics |
 | [Flink Operator](https://nightlies.apache.org/flink/flink-kubernetes-operator-docs-stable/) | any | For Flink metrics |
 | [OpenSearch Operator](https://github.com/opensearch-project/opensearch-k8s-operator) | any | For OpenSearch metrics |
-| [External Secrets Operator](https://external-secrets.io) | any | For ESO metrics |
+| [External Secrets Operator](https://external-secrets.io) | 0.10.3+ | For ESO metrics (uses `v1` API) |
 | LogClaw account | — | Get your tenant JWT from [app.logclaw.ai](https://app.logclaw.ai) |
 
 > **Don't have all operators?** The agent is tolerant — if a CRD isn't installed, it skips that collector and reports what it can.
@@ -95,8 +104,9 @@ kubectl logs -n <YOUR_NAMESPACE> deployment/logclaw-agent-logclaw-agent -f
 
 You should see log lines like:
 ```
-2025/01/01 00:00:00 collecting metrics for tenant: acme-corp
-2025/01/01 00:00:00 POST https://app.logclaw.ai/api/metrics → 200 OK
+LogClaw agent starting: tenant=acme-corp namespace=logclaw-acme
+Health server listening on :8080
+Metrics pushed: kafka_topics=3 flink_jobs=2 eso_secrets=5
 ```
 
 ---
@@ -111,15 +121,16 @@ Run the agent locally against a `kind` cluster. Requires [Docker Desktop](https:
 git clone https://github.com/logclaw/logclaw-agent.git
 cd logclaw-agent
 
+# Generate go.sum (required for Docker build)
+go mod tidy
+
+# Build for your local architecture
 docker build -t logclaw-agent:local .
 ```
 
 ### 2 — Create a kind cluster
 
 ```bash
-# If you're using OrbStack alongside Docker Desktop, set the socket explicitly
-export DOCKER_HOST=unix:///Users/$USER/.docker/run/docker.sock
-
 kind create cluster --name logclaw-test
 ```
 
@@ -129,11 +140,7 @@ kind create cluster --name logclaw-test
 kind load docker-image logclaw-agent:local --name logclaw-test
 ```
 
-### 4 — Start the LogClaw Platform locally
-
-Follow the [logclaw-platform README](https://github.com/logclaw/logclaw-platform) to start the platform on `http://localhost:3000`.
-
-### 5 — Install the agent pointing at your local platform
+### 4 — Install the agent
 
 ```bash
 # Create JWT secret (any string works for local dev)
@@ -141,7 +148,7 @@ kubectl create secret generic logclaw-agent-jwt \
   --from-literal=jwt=my-local-secret \
   -n default
 
-# Install chart with local image and local platform URL
+# Install chart with local image
 helm install logclaw-agent ./helm/logclaw-agent \
   --set image.repository=logclaw-agent \
   --set image.tag=local \
@@ -150,12 +157,44 @@ helm install logclaw-agent ./helm/logclaw-agent \
   --set global.namespace=default \
   --set agent.saasUrl=http://host.docker.internal:3000/api/metrics \
   --set externalSecret.enabled=false
+```
+
+### 5 — Verify
+
+```bash
+# Check pod is Running with readiness probe passing
+kubectl get pods -l app.kubernetes.io/name=logclaw-agent
+
+# Check health endpoints
+kubectl port-forward deployment/logclaw-agent-logclaw-agent 8080:8080 &
+curl http://localhost:8080/healthz   # → ok
+curl http://localhost:8080/readyz    # → ok (after first collection cycle)
 
 # Watch agent logs
 kubectl logs -f deployment/logclaw-agent-logclaw-agent
 ```
 
 > **`host.docker.internal`** is the magic hostname that lets a container reach your Mac's localhost. It's available automatically in Docker Desktop and kind.
+
+### Helm Lint & Template
+
+The chart ships with CI values for testing without a real cluster:
+
+```bash
+# Lint
+helm lint helm/logclaw-agent -f helm/logclaw-agent/ci/default-values.yaml
+
+# Render templates (dry run)
+helm template test-release helm/logclaw-agent \
+  -f helm/logclaw-agent/ci/default-values.yaml
+```
+
+### Tear Down
+
+```bash
+helm uninstall logclaw-agent
+kind delete cluster --name logclaw-test
+```
 
 ---
 
@@ -187,10 +226,10 @@ The agent reads these environment variables at runtime. The Helm chart sets them
 
 | Variable | Required | Description |
 |---|---|---|
-| `LOGCLAW_TENANT_ID` | ✅ | Your tenant slug (e.g. `acme-corp`) |
-| `LOGCLAW_NAMESPACE` | ✅ | Kubernetes namespace to watch for CRDs |
-| `LOGCLAW_SAAS_URL` | ✅ | Platform endpoint — `https://app.logclaw.ai/api/metrics` |
-| `LOGCLAW_AGENT_JWT` | ✅ | Bearer token for authenticating with the platform |
+| `LOGCLAW_TENANT_ID` | Yes | Your tenant slug (e.g. `acme-corp`) |
+| `LOGCLAW_NAMESPACE` | No | Kubernetes namespace to watch for CRDs (defaults to `default`) |
+| `LOGCLAW_SAAS_URL` | Yes | Platform endpoint — `https://app.logclaw.ai/api/metrics` |
+| `LOGCLAW_AGENT_JWT` | Yes | Bearer token for authenticating with the platform |
 
 ---
 
@@ -198,12 +237,12 @@ The agent reads these environment variables at runtime. The Helm chart sets them
 
 Every 30 seconds the agent collects:
 
-| Collector | Kubernetes CRD | What it measures |
-|---|---|---|
-| **Kafka** | `Kafka.kafka.strimzi.io` | Per-topic consumer lag (messages behind) |
-| **Flink** | `FlinkDeployment.flink.apache.org` | Job state (`RUNNING`, `FAILED`, etc.) + restart count |
-| **OpenSearch** | `OpenSearchCluster.opensearch.opster.io` | Cluster health (`green` / `yellow` / `red`), node counts |
-| **ExternalSecrets** | `ExternalSecret.external-secrets.io` | Sync status (`Ready`) + timestamp of last sync |
+| Collector | Kubernetes CRD | API Version | What it measures |
+|---|---|---|---|
+| **Kafka** | `Kafka.kafka.strimzi.io` | `v1beta2` | Per-topic consumer lag (messages behind) |
+| **Flink** | `FlinkDeployment.flink.apache.org` | `v1beta1` | Job state (`RUNNING`, `FAILED`, etc.) |
+| **OpenSearch** | `OpenSearchCluster.opensearch.opster.io` | `v1` | Cluster health (`green`/`yellow`/`red`), node counts |
+| **ExternalSecrets** | `ExternalSecret.external-secrets.io` | `v1` | Sync status (`Ready`) + timestamp of last sync |
 
 The collected data is sent as JSON to the platform:
 
@@ -228,7 +267,7 @@ The agent is designed to run with minimal permissions:
 - **Read-only filesystem**: `readOnlyRootFilesystem: true` — no files can be written inside the container
 - **No privilege escalation**: `allowPrivilegeEscalation: false`
 - **Dropped capabilities**: All Linux capabilities dropped (`capabilities.drop: ["ALL"]`)
-- **Outbound-only**: The agent never listens on any port — it only makes outbound HTTPS calls to the platform
+- **Health-only listener**: The agent listens on `:8080` exclusively for `/healthz` and `/readyz` Kubernetes probes — no other endpoints are exposed
 - **Least-privilege RBAC**: The ServiceAccount can only `list` and `watch` the specific CRDs it needs. It has no write permissions and no access to Secrets, ConfigMaps, or other resources
 
 ---
@@ -241,6 +280,8 @@ The image is built and pushed to GitHub Container Registry on every push to `mai
 ghcr.io/logclaw/agent:<version>
 ghcr.io/logclaw/agent:latest
 ```
+
+**Multi-arch**: Images are built for both `linux/amd64` and `linux/arm64` using Docker Buildx with QEMU emulation in CI.
 
 **Multi-stage build**: Uses `golang:1.22-alpine` to compile a fully static binary, then copies it into `gcr.io/distroless/static:nonroot` — a minimal base image with no shell, no package manager, and no unnecessary files. The final image is under 10 MB.
 
@@ -256,23 +297,32 @@ docker pull ghcr.io/logclaw/agent:latest
 
 ```
 logclaw-agent/
-├── main.go                    # Entry point: starts collectors + HTTP push loop
-├── Dockerfile                 # Multi-stage build → distroless image
+├── main.go                    # Entry point: health server + collection loop + push
+├── collectors/
+│   ├── client.go              # Shared Kubernetes dynamic client (sync.Once)
+│   ├── kafka.go               # Strimzi Kafka consumer lag collector
+│   ├── flink.go               # Flink job state collector
+│   ├── opensearch.go          # OpenSearch cluster health collector
+│   └── eso.go                 # ExternalSecret sync status collector
+├── Dockerfile                 # Multi-arch multi-stage build → distroless image
 ├── go.mod                     # Go module definition
+├── go.sum                     # Go dependency checksums
 ├── helm/
 │   └── logclaw-agent/
 │       ├── Chart.yaml         # Chart metadata + version
 │       ├── values.yaml        # Default configuration
+│       ├── ci/
+│       │   └── default-values.yaml  # CI/local-dev test values
 │       └── templates/
-│           ├── deployment.yaml    # Agent pod spec
+│           ├── _helpers.tpl       # Template helpers
+│           ├── deployment.yaml    # Agent pod spec (with health probes)
 │           ├── serviceaccount.yaml
 │           ├── clusterrole.yaml   # CRD read permissions
 │           ├── clusterrolebinding.yaml
-│           ├── externalsecret.yaml  # ESO-managed JWT secret
-│           └── secret.yaml        # Manual JWT secret (when ESO disabled)
+│           └── externalsecret.yaml  # ESO-managed JWT secret (v1 API)
 └── .github/
     └── workflows/
-        └── release.yaml       # Builds + pushes GHCR image on tag push
+        └── docker.yml         # Multi-arch build + push to GHCR
 ```
 
 ---
@@ -280,9 +330,10 @@ logclaw-agent/
 ## Contributing
 
 1. Fork the repo and create a branch: `git checkout -b feat/your-feature`
-2. Make your changes to `main.go` or the Helm chart
-3. Build and test locally with kind (see [Local Development](#local-development))
-4. Open a pull request
+2. Make your changes to `main.go`, collectors, or the Helm chart
+3. Run `helm lint helm/logclaw-agent -f helm/logclaw-agent/ci/default-values.yaml`
+4. Build and test locally with kind (see [Local Development](#local-development))
+5. Open a pull request
 
 Please open an issue first for large changes so we can discuss the approach.
 
