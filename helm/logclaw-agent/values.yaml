@@ -14,7 +14,7 @@ global:
 
 agent:
   # LogClaw SaaS endpoint that receives metrics
-  saasUrl: "https://app.logclaw.io/api/metrics"
+  saasUrl: "https://app.logclaw.ai/api/metrics"
   # Name of the Kubernetes Secret containing LOGCLAW_AGENT_JWT
   jwtSecretName: "logclaw-agent-jwt"
   jwtSecretKey: "jwt"

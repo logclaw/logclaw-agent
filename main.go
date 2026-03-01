@@ -59,7 +59,7 @@ func push(ctx context.Context, endpoint, jwt string, payload MetricsPayload) err
 
 func main() {
 	tenantID  := mustEnv("LOGCLAW_TENANT_ID")
-	saasURL   := mustEnv("LOGCLAW_SAAS_URL")    // e.g. https://app.logclaw.io/api/metrics
+	saasURL   := mustEnv("LOGCLAW_SAAS_URL")    // e.g. https://app.logclaw.ai/api/metrics
 	agentJWT  := mustEnv("LOGCLAW_AGENT_JWT")
 	namespace := os.Getenv("LOGCLAW_NAMESPACE")
 	if namespace == "" {
