@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/logclaw/agent/collectors"
@@ -16,13 +17,16 @@ import (
 
 // MetricsPayload is the JSON body posted to LogClaw SaaS.
 type MetricsPayload struct {
-	TenantID    string                       `json:"tenantId"`
-	CollectedAt string                       `json:"collectedAt"`
-	KafkaLag    map[string]int64             `json:"kafkaLag"`
-	FlinkJobs   []collectors.FlinkJob        `json:"flinkJobs"`
-	OsHealth    collectors.OSHealth          `json:"osHealth"`
+	TenantID    string                         `json:"tenantId"`
+	CollectedAt string                         `json:"collectedAt"`
+	KafkaLag    map[string]int64               `json:"kafkaLag"`
+	FlinkJobs   []collectors.FlinkJob          `json:"flinkJobs"`
+	OsHealth    collectors.OSHealth            `json:"osHealth"`
 	ESOStatus   []collectors.ESOExternalSecret `json:"esoStatus"`
 }
+
+// ready is set to 1 after the first successful collection cycle.
+var ready atomic.Int32
 
 func mustEnv(key string) string {
 	v := os.Getenv(key)
@@ -57,14 +61,43 @@ func push(ctx context.Context, endpoint, jwt string, payload MetricsPayload) err
 	return nil
 }
 
+func startHealthServer() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "ok")
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if ready.Load() == 1 {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, "ok")
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintln(w, "not ready")
+		}
+	})
+
+	server := &http.Server{
+		Addr:              ":8080",
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	log.Printf("Health server listening on :8080")
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("ERROR health server: %v", err)
+	}
+}
+
 func main() {
-	tenantID  := mustEnv("LOGCLAW_TENANT_ID")
-	saasURL   := mustEnv("LOGCLAW_SAAS_URL")    // e.g. https://app.logclaw.ai/api/metrics
-	agentJWT  := mustEnv("LOGCLAW_AGENT_JWT")
+	tenantID := mustEnv("LOGCLAW_TENANT_ID")
+	saasURL := mustEnv("LOGCLAW_SAAS_URL") // e.g. https://app.logclaw.ai/api/metrics
+	agentJWT := mustEnv("LOGCLAW_AGENT_JWT")
 	namespace := os.Getenv("LOGCLAW_NAMESPACE")
 	if namespace == "" {
 		namespace = "default"
 	}
+
+	go startHealthServer()
 
 	interval := 30 * time.Second
 	maxBackoff := 5 * time.Minute
@@ -100,6 +133,9 @@ func main() {
 		}
 
 		cancel()
+
+		// Mark ready after first successful collection cycle
+		ready.Store(1)
 
 		payload := MetricsPayload{
 			TenantID:    tenantID,

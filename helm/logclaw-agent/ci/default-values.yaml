@@ -1,0 +1,23 @@
+# CI test values for logclaw-agent chart
+# Provides all required values for `helm lint`, `helm template`, and local `kind` development.
+# Disables ESO (uses a pre-created manual Secret instead).
+
+global:
+  tenantId: "ci-test"
+  namespace: ""
+
+agent:
+  saasUrl: "https://app.logclaw.ai/api/metrics"
+  jwtSecretName: "logclaw-agent-jwt"
+  jwtSecretKey: "jwt"
+
+externalSecret:
+  enabled: false
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "200m"
+    memory: "128Mi"

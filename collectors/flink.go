@@ -7,8 +7,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 )
 
 var flinkGVR = schema.GroupVersionResource{
@@ -26,14 +24,9 @@ type FlinkJob struct {
 
 // FlinkJobs reads all FlinkDeployment CRs in the namespace and returns their job states.
 func FlinkJobs(ctx context.Context, namespace string) ([]FlinkJob, error) {
-	cfg, err := rest.InClusterConfig()
+	client, err := Client()
 	if err != nil {
-		return nil, fmt.Errorf("in-cluster config: %w", err)
-	}
-
-	client, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("dynamic client: %w", err)
+		return nil, err
 	}
 
 	list, err := client.Resource(flinkGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
