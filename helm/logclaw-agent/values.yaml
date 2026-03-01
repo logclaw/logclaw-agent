@@ -1,0 +1,52 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/logclaw/agent
+  pullPolicy: IfNotPresent
+  tag: ""  # defaults to Chart.appVersion
+
+imagePullSecrets: []
+
+# REQUIRED values
+global:
+  tenantId: ""        # e.g. "acme-corp" — must match slug in LogClaw SaaS
+  namespace: ""       # namespace where LogClaw stack is deployed; defaults to Release.Namespace
+
+agent:
+  # LogClaw SaaS endpoint that receives metrics
+  saasUrl: "https://app.logclaw.io/api/metrics"
+  # Name of the Kubernetes Secret containing LOGCLAW_AGENT_JWT
+  jwtSecretName: "logclaw-agent-jwt"
+  jwtSecretKey: "jwt"
+
+# ExternalSecret config — set provider to "" to skip ESO (use manual Secret instead)
+externalSecret:
+  enabled: true
+  refreshInterval: "1h"
+  secretStoreName: "logclaw-secret-store"
+  secretStoreKind: "ClusterSecretStore"
+  # Remote path for the agent JWT secret
+  remoteKey: ""   # auto-resolved to logclaw/<tenantId>/agent/jwt if empty
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "200m"
+    memory: "128Mi"
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

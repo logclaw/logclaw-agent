@@ -1,0 +1,14 @@
+apiVersion: v2
+name: logclaw-agent
+description: LogClaw in-cluster metrics agent — outbound-only HTTPS push to LogClaw SaaS
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - logclaw
+  - monitoring
+  - agent
+home: https://logclaw.io
+maintainers:
+  - name: LogClaw
+    email: eng@logclaw.io
