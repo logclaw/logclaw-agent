@@ -7,8 +7,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 )
 
 var kafkaGVR = schema.GroupVersionResource{
@@ -21,14 +19,9 @@ var kafkaGVR = schema.GroupVersionResource{
 // The Strimzi operator exposes lag in the CR status under .status.kafkaConsumerGroups[].topics[].lag
 // Falls back to zero map if the field is absent (e.g., Strimzi version doesn't expose it).
 func KafkaLag(ctx context.Context, namespace string) (map[string]int64, error) {
-	cfg, err := rest.InClusterConfig()
+	client, err := Client()
 	if err != nil {
-		return nil, fmt.Errorf("in-cluster config: %w", err)
-	}
-
-	client, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("dynamic client: %w", err)
+		return nil, err
 	}
 
 	list, err := client.Resource(kafkaGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})

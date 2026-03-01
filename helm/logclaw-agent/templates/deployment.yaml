@@ -40,6 +40,10 @@ spec:
             capabilities:
               drop:
                 {{- toYaml .Values.securityContext.capabilities.drop | nindent 16 }}
+          ports:
+            - name: health
+              containerPort: 8080
+              protocol: TCP
           env:
             - name: LOGCLAW_TENANT_ID
               value: {{ include "logclaw-agent.tenantId" . | quote }}
@@ -52,6 +56,18 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.agent.jwtSecretName }}
                   key: {{ .Values.agent.jwtSecretKey }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

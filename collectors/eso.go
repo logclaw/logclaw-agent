@@ -8,13 +8,11 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 )
 
 var externalSecretGVR = schema.GroupVersionResource{
 	Group:    "external-secrets.io",
-	Version:  "v1beta1",
+	Version:  "v1",
 	Resource: "externalsecrets",
 }
 
@@ -27,14 +25,9 @@ type ESOExternalSecret struct {
 
 // ESOStatus reads all ExternalSecret CRs in the namespace and returns their sync state.
 func ESOStatus(ctx context.Context, namespace string) ([]ESOExternalSecret, error) {
-	cfg, err := rest.InClusterConfig()
+	client, err := Client()
 	if err != nil {
-		return nil, fmt.Errorf("in-cluster config: %w", err)
-	}
-
-	client, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("dynamic client: %w", err)
+		return nil, err
 	}
 
 	list, err := client.Resource(externalSecretGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})

@@ -7,8 +7,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 )
 
 var opensearchGVR = schema.GroupVersionResource{
@@ -26,14 +24,9 @@ type OSHealth struct {
 
 // OpenSearchHealth reads the first OpenSearchCluster CR in the namespace.
 func OpenSearchHealth(ctx context.Context, namespace string) (OSHealth, error) {
-	cfg, err := rest.InClusterConfig()
+	client, err := Client()
 	if err != nil {
-		return OSHealth{Status: "unknown"}, fmt.Errorf("in-cluster config: %w", err)
-	}
-
-	client, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return OSHealth{Status: "unknown"}, fmt.Errorf("dynamic client: %w", err)
+		return OSHealth{Status: "unknown"}, err
 	}
 
 	list, err := client.Resource(opensearchGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
